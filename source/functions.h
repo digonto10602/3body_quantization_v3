@@ -4,6 +4,7 @@
 #include<bits/stdc++.h>
 #include<cmath>
 #include<Eigen/Dense>
+#include "spherical_functions.h"
 
 typedef std::complex<double> comp;
 
@@ -16,7 +17,8 @@ comp mysqrt(    comp x  )
 comp omega_func(    comp p, 
                     double m    )
 {
-    return std::sqrt(p*p + m*m);
+    comp mcomp = (comp) m; 
+    return std::sqrt(p*p + mcomp*mcomp);
 }
 
 comp sigma( comp En,
@@ -61,7 +63,7 @@ comp kallentriangle(    comp x,
                         comp z  )
 {
     //return x*x + y*y + z*z - 2.0*x*y - 2.0*y*z - 2.0*z*x;
-    return x*x + y*y + z*z - 2.0*(x*y + y*z + z*x);
+    return x*x + y*y + z*z - ((comp)2.0)*(x*y + y*z + z*x);
 
 }
 
@@ -69,22 +71,25 @@ comp q2psq_star(    comp sigma_i,
                     double mj, 
                     double mk )
 {
-    return kallentriangle(sigma_i, mj*mj, mk*mk)/(4.0*sigma_i);
+    comp mjcomp = (comp) mj; 
+    comp mkcomp = (comp) mk; 
+    return kallentriangle(sigma_i, mjcomp*mjcomp, mkcomp*mkcomp)/(((comp)4.0)*sigma_i);
 }
 
 comp pmom(  comp En,
             comp sigk,
             double m    )
 {
-    return std::sqrt(kallentriangle(En*En,sigk,m*m))/(2.0*sqrt(En*En));
+    return std::sqrt(kallentriangle(En*En,sigk,m*m))/(((comp)2.0)*sqrt(En*En));
 }
 
 comp kmax_for_P0(   comp En, 
                     double m )
 {
-    comp A = (En*En + m*m)/(2.0*En);
+    comp mcomp = (comp) m; 
+    comp A = (En*En + mcomp*mcomp)/(((comp)2.0)*En);
 
-    return A*A - m*m;
+    return A*A - mcomp*mcomp;
 }
 
 
@@ -92,17 +97,17 @@ comp Jfunc( comp z  )
 {
     if(std::real(z)<=0.0)
     {
-        return 0.0;
+        return ((comp)0.0);
     }
     else if(std::real(z)>0.0 && std::real(z)<1.0)
     {
-        comp A = -1.0/z;
-        comp B = std::exp(-1.0/(1.0-z));
+        comp A = -((comp)1.0)/z;
+        comp B = std::exp(-((comp)1.0)/(((comp)1.0)-z));
         return std::exp(A*B);
     }
     else
     {
-        return 1.0;
+        return ((comp)1.0);
     }
     
     
@@ -114,16 +119,18 @@ comp cutoff_function_1( comp sigma_i,
                         double mk, 
                         double epsilon_h   )
 {
+    comp mjcomp = (comp) mj;
+    comp mkcomp = (comp) mk; 
 
     if(mj==mk && epsilon_h==0.0)
     {
-        comp Z = sigma_i/(4.0*mj*mj);
+        comp Z = sigma_i/(((comp)4.0)*mjcomp*mjcomp);
         return Jfunc(Z); 
     }
     else 
     {
         //std::cout<<"went to else"<<std::endl; 
-        comp Z = (comp) (1.0 + epsilon_h)*( sigma_i - (comp) std::abs(mj*mj - mk*mk) )/( (mj + mk)*(mj + mk) - std::abs(mj*mj - mk*mk) );
+        comp Z = (comp) (((comp)1.0) + ((comp)epsilon_h))*( sigma_i - (comp) std::abs(mjcomp*mjcomp - mkcomp*mkcomp) )/( (mjcomp + mkcomp)*(mjcomp + mkcomp) - std::abs(mjcomp*mjcomp - mkcomp*mkcomp) );
         return Jfunc(Z);
         
     }
@@ -175,7 +182,7 @@ comp dawson_func(comp x)
     comp summ = 0.0;
 
     comp y = 0.0;
-    comp dely = x/steps;
+    comp dely = x/((comp)steps);
     for(int i=0;i<(int)steps;++i)
     {
         summ = summ + std::exp(y*y)*dely;
@@ -187,8 +194,8 @@ comp dawson_func(comp x)
 
 comp ERFI_func(comp x)
 {
-    double pi = std::acos(-1.0);
-    return dawson_func(x)*2.0*std::exp(x*x)/std::sqrt(pi);
+    comp pi = std::acos(-1.0);
+    return dawson_func(x)*((comp)2.0)*std::exp(x*x)/std::sqrt(pi);
 }
 
 /* Configuration vectors for the spectator momentum, these are 
@@ -200,11 +207,13 @@ void config_maker(  std::vector< std::vector<comp> > &p_config,
                     double mi,
                     double L    )
 {
-    double pi = std::acos(-1.0);
+    comp pi = std::acos(-1.0);
+    comp twopibyL = ((comp) 2.0*pi)/((comp) L);
+    comp Lby2pi = ((comp) L)/((comp) 2.0*pi);
 
-    comp kmax = pmom(En,0.0,mi);
+    comp kmax = pmom(En,((comp)0.0),mi);
 
-    int nmax = (int)ceil((L/(2.0*pi))*abs(kmax));
+    int nmax = (int)ceil((Lby2pi.real())*abs(kmax));
 
     int nmaxsq = nmax*nmax; 
 
@@ -217,9 +226,10 @@ void config_maker(  std::vector< std::vector<comp> > &p_config,
                 int nsq = i*i + j*j + k*k; 
                 if(nsq<=nmaxsq)
                 {
-                    comp px = (2.0*pi/L)*i;
-                    comp py = (2.0*pi/L)*j;
-                    comp pz = (2.0*pi/L)*k; 
+                    comp px = (((comp)2.0)*pi/((comp)L))*((comp)i);
+                    comp py = (((comp)2.0)*pi/((comp)L))*((comp)j);
+                    comp pz = (((comp)2.0)*pi/((comp)L))*((comp)k); 
+
 
                     comp p = std::sqrt(px*px + py*py + pz*pz);
                     
@@ -260,7 +270,9 @@ void config_maker_1(  std::vector< std::vector<comp> > &p_config,
                     double tolerance    )
 {
     char debug = 'n';
-    double pi = std::acos(-1.0);
+    comp pi = std::acos(-1.0); 
+    comp Lby2pi = ((comp) L)/((comp) 2.0*pi);
+    comp twopibyL = ((comp) 2.0*pi)/((comp) L);
 
     //comp cutoff = cutoff_function_1(sig_k,mj, mk, epsilon_h);
     //comp kmax = pmom(En,0.0,mi);
@@ -280,10 +292,9 @@ void config_maker_1(  std::vector< std::vector<comp> > &p_config,
                 int nsq = i*i + j*j + k*k; 
                 //if(nsq<=nmaxsq)
                 {
-                    comp px = (2.0*pi/(xi*L))*i;
-                    comp py = (2.0*pi/(xi*L))*j;
-                    comp pz = (2.0*pi/(xi*L))*k; 
-
+                    comp px = (((comp)2.0)*pi/((comp)xi*(comp)L))*((comp)i);
+                    comp py = (((comp)2.0)*pi/((comp)xi*(comp)L))*((comp)j);
+                    comp pz = (((comp)2.0)*pi/((comp)xi*(comp)L))*((comp)k); 
                     comp p = std::sqrt(px*px + py*py + pz*pz);
 
                     comp Px = total_P[0];
@@ -367,7 +378,7 @@ void config_maker_2(  std::vector< std::vector<comp> > &p_config,
                     double tolerance    )
 {
     char debug = 'n';
-    double pi = std::acos(-1.0);
+    comp pi = std::acos(-1.0);
 
     //comp cutoff = cutoff_function_1(sig_k,mj, mk, epsilon_h);
     //comp kmax = pmom(En,0.0,mi);
@@ -387,9 +398,10 @@ void config_maker_2(  std::vector< std::vector<comp> > &p_config,
                 int nsq = i*i + j*j + k*k; 
                 //if(nsq<=nmaxsq)
                 {
-                    comp px = (2.0*pi/(xi*L))*i;
-                    comp py = (2.0*pi/(xi*L))*j;
-                    comp pz = (2.0*pi/(xi*L))*k; 
+                    comp px = (((comp)2.0)*pi/((comp)xi*(comp)L))*((comp)i);
+                    comp py = (((comp)2.0)*pi/((comp)xi*(comp)L))*((comp)j);
+                    comp pz = (((comp)2.0)*pi/((comp)xi*(comp)L))*((comp)k); 
+
 
                     comp p = std::sqrt(px*px + py*py + pz*pz);
 
@@ -499,6 +511,362 @@ void non_int_spectrum_config_maker( std::vector<std::vector<int> > &n_config,
         }
     }
 }
+
+//This config maker makes the plm_config vectors which
+//will have 5 elements: px, py, pz, ell, proj_m 
+//based on the waves_vec supplied which contains ell
+//values as waves_vec = [0,1], 0 means 'S' wave and 
+//1 means 'P' wave and so on, this function will create
+//config with corresponding ell and proj_m values 
+void config_maker_3(  
+                    std::vector< std::vector<comp> > &plm_config,
+                    std::vector<int> waves_vec, 
+                    comp En,
+                    std::vector<comp> total_P,
+                    double mi,
+                    double mj, 
+                    double mk,
+                    double L,
+                    double epsilon_h,
+                    double max_num_shell, 
+                    double tolerance    
+                )
+{
+    char debug = 'n';
+    comp pi = std::acos(-1.0); 
+    comp Lby2pi = ((comp) L)/((comp) 2.0*pi);
+    comp twopibyL = ((comp) 2.0*pi)/((comp) L);
+
+    //comp cutoff = cutoff_function_1(sig_k,mj, mk, epsilon_h);
+    //comp kmax = pmom(En,0.0,mi);
+    comp kmax = kmax_for_P0(En, mi);
+
+    int nmax = max_num_shell;//(int)ceil((L/(2.0*pi))*abs(kmax));
+    //std::cout<<"Nmax = "<<nmax<<std::endl;
+
+    std::vector<int> ell_vec;
+    std::vector<int> proj_m_vec; 
+
+    std::vector< std::vector<int> > ell_m_vec(2, std::vector<int>()); 
+
+    for(int i=0; i<waves_vec.size(); ++i)
+    {
+        int ell = waves_vec[i]; 
+         
+
+        std::vector<int> m_vec;
+        ell_m_vector(ell, m_vec); 
+        for(int j=0; j<m_vec.size(); ++j)
+        {
+            int proj_m = m_vec[j]; 
+            ell_m_vec[0].push_back(ell);
+            ell_m_vec[1].push_back(proj_m);
+        }
+    }
+
+    int nmaxsq = nmax*nmax; 
+
+    for(int lm=0; lm<ell_m_vec[0].size(); ++lm)
+    {
+        int ell = ell_m_vec[0][lm];
+        int proj_m = ell_m_vec[1][lm]; 
+
+        for(int i=-nmax; i<nmax + 1; ++i)
+        {
+            for(int j=-nmax; j<nmax + 1; ++j)
+            {
+                for(int k=-nmax; k<nmax + 1; ++k)
+                {
+                    int nsq = i*i + j*j + k*k; 
+                    //if(nsq<=nmaxsq)
+                    {
+                        comp px = (((comp)2.0)*pi/((comp)L))*((comp)i);
+                        comp py = (((comp)2.0)*pi/((comp)L))*((comp)j);
+                        comp pz = (((comp)2.0)*pi/((comp)L))*((comp)k); 
+
+                        comp p = std::sqrt(px*px + py*py + pz*pz);
+
+                        comp Px = total_P[0];
+                        comp Py = total_P[1];
+                        comp Pz = total_P[2];
+
+                        comp Pminusp_x = Px - px;
+                        comp Pminusp_y = Py - py;
+                        comp Pminusp_z = Pz - pz; 
+                        comp Pminusp = std::sqrt(Pminusp_x*Pminusp_x + Pminusp_y*Pminusp_y + Pminusp_z*Pminusp_z);
+
+
+                        comp sig_k = (En - omega_func(p,mi))*(En - omega_func(p,mi)) - Pminusp*Pminusp; 
+
+                        comp cutoff = cutoff_function_1(sig_k, mj, mk, epsilon_h);
+
+                        //std::cout<<"kmax = "<<kmax<<'\t'<<"p = "<<p<<'\t'<<"sigi = "<<sig_k<<'\t'<<"cutoff = "<<cutoff<<std::endl; 
+                        //std::cout<<"mi="<<mi<<'\t'<<"mj="<<mj<<'\t'<<"mk="<<mk<<std::endl;
+                        double tmp = real(cutoff);
+                        //std::cout<<"cutoff = "<<cutoff<<std::endl; 
+                        if(tmp<tolerance) tmp = 0.0;
+                        //if(abs(p)<=abs(kmax))
+
+                        //this was set last time 
+                        //if(tmp>0.0 && abs(p)<abs(kmax)) 
+
+                        
+                        if(tmp>0.0) 
+                        {
+                            plm_config[0].push_back(px);
+                            plm_config[1].push_back(py);
+                            plm_config[2].push_back(pz);
+                            plm_config[3].push_back(ell); 
+                            plm_config[4].push_back(proj_m); 
+                            
+                            if(debug=='y')
+                            {
+                                std::cout << "cutoff = " << cutoff << std::endl;
+                                std::cout << "n = " << i << j << k << " nsq = " << nsq << " nmaxsq = " << nmaxsq << std::endl; 
+                                std::cout << "px = " << px << " py = " << py << " pz = " << pz << std::endl;
+                                std::cout << "p = " << p << " kmax = " << kmax << std::endl;
+                                std::cout << "ell = " << ell << " proj_m = " << proj_m << std::endl; 
+                            } 
+                    
+                        }
+                        else 
+                        {
+                            continue; 
+                        }
+                    }
+                }
+            }
+        }
+    }
+    int check_p_size = 0;
+    int psize0 = plm_config[0].size();
+    int psize1 = plm_config[1].size();
+    int psize2 = plm_config[2].size();
+    int psize3 = plm_config[3].size();
+    int psize4 = plm_config[4].size();
+
+    if(debug=='y')
+    {
+        std::cout<<"size1 = "<<psize0<<'\t'<<"size2 = "<<psize1<<'\t'<<"size3 = "<<psize2<<'\t'<<"size4 = "<<psize3<<'\t'<<"size5 = "<<psize4<<std::endl; 
+    }
+
+    /*
+    if(psize0==0 || psize1==0 || psize2==0)
+    {
+        plm_config[0].push_back(0.0);
+        plm_config[1].push_back(0.0);
+        plm_config[2].push_back(0.0);
+        plm_config[3].push_back(0.0);
+        plm_config[4].push_back(0.0);
+    }
+    */ 
+    //std::cout << "nmax = " << nmax << '\t' << "nval = " << (L/(2.0*pi))*abs(kmax) << '\t' 
+    //          << "kmax = " << kmax << std::endl;
+}
+
+//This config maker makes the plm_config vectors which
+//will have 5 elements: px, py, pz, ell, proj_m 
+//based on the waves_vec supplied which contains ell
+//values as waves_vec = [0,1], 0 means 'S' wave and 
+//1 means 'P' wave and so on, this function will create
+//config with corresponding ell and proj_m values 
+//this includes the integer n list as well
+void config_maker_4(  
+                    std::vector< std::vector<comp> > &plm_config,
+                    std::vector< std::vector<int> > &n_config, 
+                    std::vector<int> waves_vec, 
+                    comp En,
+                    std::vector<comp> total_P,
+                    double mi,
+                    double mj, 
+                    double mk,
+                    double L,
+                    double epsilon_h,
+                    double max_num_shell, 
+                    double tolerance    
+                )
+{
+    char debug = 'n';
+    comp pi = std::acos(-1.0); 
+    comp Lby2pi = ((comp) L)/((comp) 2.0*pi);
+    comp twopibyL = ((comp) 2.0*pi)/((comp) L);
+
+    //comp cutoff = cutoff_function_1(sig_k,mj, mk, epsilon_h);
+    //comp kmax = pmom(En,0.0,mi);
+    comp kmax = kmax_for_P0(En, mi);
+
+    int nmax = max_num_shell;//(int)ceil((L/(2.0*pi))*abs(kmax));
+    //std::cout<<"Nmax = "<<nmax<<std::endl;
+
+    std::vector<int> ell_vec;
+    std::vector<int> proj_m_vec; 
+
+    std::vector< std::vector<int> > ell_m_vec(2, std::vector<int>()); 
+
+    for(int i=0; i<waves_vec.size(); ++i)
+    {
+        int ell = waves_vec[i]; 
+         
+
+        std::vector<int> m_vec;
+        ell_m_vector(ell, m_vec); 
+        for(int j=0; j<m_vec.size(); ++j)
+        {
+            int proj_m = m_vec[j]; 
+            ell_m_vec[0].push_back(ell);
+            ell_m_vec[1].push_back(proj_m);
+        }
+    }
+
+    int nmaxsq = nmax*nmax; 
+
+    for(int lm=0; lm<ell_m_vec[0].size(); ++lm)
+    {
+        int ell = ell_m_vec[0][lm];
+        int proj_m = ell_m_vec[1][lm]; 
+
+        for(int i=-nmax; i<nmax + 1; ++i)
+        {
+            for(int j=-nmax; j<nmax + 1; ++j)
+            {
+                for(int k=-nmax; k<nmax + 1; ++k)
+                {
+                    int nsq = i*i + j*j + k*k; 
+                    //if(nsq<=nmaxsq)
+                    {
+                        comp px = (((comp)2.0)*pi/((comp)L))*((comp)i);
+                        comp py = (((comp)2.0)*pi/((comp)L))*((comp)j);
+                        comp pz = (((comp)2.0)*pi/((comp)L))*((comp)k); 
+
+                        comp p = std::sqrt(px*px + py*py + pz*pz);
+
+                        comp Px = total_P[0];
+                        comp Py = total_P[1];
+                        comp Pz = total_P[2];
+
+                        comp Pminusp_x = Px - px;
+                        comp Pminusp_y = Py - py;
+                        comp Pminusp_z = Pz - pz; 
+                        comp Pminusp = std::sqrt(Pminusp_x*Pminusp_x + Pminusp_y*Pminusp_y + Pminusp_z*Pminusp_z);
+
+
+                        comp sig_k = (En - omega_func(p,mi))*(En - omega_func(p,mi)) - Pminusp*Pminusp; 
+
+                        comp cutoff = cutoff_function_1(sig_k, mj, mk, epsilon_h);
+
+                        //std::cout<<"kmax = "<<kmax<<'\t'<<"p = "<<p<<'\t'<<"sigi = "<<sig_k<<'\t'<<"cutoff = "<<cutoff<<std::endl; 
+                        //std::cout<<"mi="<<mi<<'\t'<<"mj="<<mj<<'\t'<<"mk="<<mk<<std::endl;
+                        double tmp = real(cutoff);
+                        //std::cout<<"cutoff = "<<cutoff<<std::endl; 
+                        if(tmp<tolerance) tmp = 0.0;
+                        //if(abs(p)<=abs(kmax))
+
+                        //this was set last time 
+                        //if(tmp>0.0 && abs(p)<abs(kmax)) 
+
+                        
+                        if(tmp>0.0) 
+                        {
+                            plm_config[0].push_back(px);
+                            plm_config[1].push_back(py);
+                            plm_config[2].push_back(pz);
+                            plm_config[3].push_back(ell); 
+                            plm_config[4].push_back(proj_m); 
+                            n_config[0].push_back(i); 
+                            n_config[1].push_back(j);
+                            n_config[2].push_back(k);
+                            
+                            if(debug=='y')
+                            {
+                                std::cout << "cutoff = " << cutoff << std::endl;
+                                std::cout << "n = " << i << j << k << " nsq = " << nsq << " nmaxsq = " << nmaxsq << std::endl; 
+                                std::cout << "px = " << px << " py = " << py << " pz = " << pz << std::endl;
+                                std::cout << "p = " << p << " kmax = " << kmax << std::endl;
+                                std::cout << "ell = " << ell << " proj_m = " << proj_m << std::endl; 
+                            } 
+                    
+                        }
+                        else 
+                        {
+                            continue; 
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+
+    if(debug=='y')
+    {
+        int check_p_size = 0;
+        int psize0 = plm_config[0].size();
+        int psize1 = plm_config[1].size();
+        int psize2 = plm_config[2].size();
+        int psize3 = plm_config[3].size();
+        int psize4 = plm_config[4].size();
+        std::cout<<"size1 = "<<psize0<<'\t'<<"size2 = "<<psize1<<'\t'<<"size3 = "<<psize2<<'\t'<<"size4 = "<<psize3<<'\t'<<"size5 = "<<psize4<<std::endl; 
+    }
+
+    /*
+    if(psize0==0 || psize1==0 || psize2==0)
+    {
+        plm_config[0].push_back(0.0);
+        plm_config[1].push_back(0.0);
+        plm_config[2].push_back(0.0);
+        plm_config[3].push_back(0.0);
+        plm_config[4].push_back(0.0);
+    }
+    */ 
+    //std::cout << "nmax = " << nmax << '\t' << "nval = " << (L/(2.0*pi))*abs(kmax) << '\t' 
+    //          << "kmax = " << kmax << std::endl;
+}
+
+
+//Send this vector p and omega_p
+//with E-wk and P-k to get the boosted p*
+std::vector<comp> boost( 
+                            comp p0, 
+                            std::vector<comp> p, 
+                            comp E2p, 
+                            std::vector<comp> P2p
+        )
+{
+    comp px = p[0];
+    comp py = p[1];
+    comp pz = p[2]; 
+
+    comp P2px = P2p[0];
+    comp P2py = P2p[1]; 
+    comp P2pz = P2p[2]; 
+    comp zeroval = {0.0,0.0}; 
+    if(P2px == zeroval && P2py == zeroval && P2pz == zeroval)
+    {
+        return p; 
+    }
+
+    comp P2norm = std::sqrt(P2px*P2px + P2py*P2py + P2pz*P2pz);
+    std::vector<comp> P2hat(3); 
+    P2hat[0] = P2px/P2norm; 
+    P2hat[1] = P2py/P2norm; 
+    P2hat[2] = P2pz/P2norm; 
+
+    comp beta2 = P2norm/E2p;
+    comp gam2 = 1.0/(std::sqrt(1.0 - beta2*beta2)); 
+    comp outx = px + ((gam2 - 1.0)*px*P2hat[0] - gam2 * beta2 * p0)*P2hat[0]; 
+    comp outy = py + ((gam2 - 1.0)*px*P2hat[1] - gam2 * beta2 * p0)*P2hat[1]; 
+    comp outz = pz + ((gam2 - 1.0)*px*P2hat[2] - gam2 * beta2 * p0)*P2hat[2]; 
+
+    std::vector<comp> out(3); 
+    out[0] = outx; 
+    out[1] = outy; 
+    out[2] = outz; 
+
+    return out; 
+
+}
+
+
 
 comp threebody_non_int_energy_lab(  double m1, 
                                 double m2, 

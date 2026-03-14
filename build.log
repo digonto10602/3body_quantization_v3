@@ -1,0 +1,1 @@
+compile_gpu_varsize_batched_inverse.sh: 2: set: Illegal option -o pipefail
