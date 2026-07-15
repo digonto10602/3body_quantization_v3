@@ -20,6 +20,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <future>
 #include <regex>
@@ -148,6 +149,8 @@ struct MultiConfig {
     int max_fcn_evals = 0;
     std::string root_search_mode = "full_scan";
     std::string det_backend = "cpu_openmp";
+    std::string projected_basis_cache_mode = "disabled";
+    std::string projected_basis_cache_root;
     bool fallback_full_scan = true;
     int window_half_rows = 50;
     int max_window_half_rows = 250;
@@ -221,6 +224,8 @@ static MultiConfig multiconfig_from_config(const std::string& cfgpath) {
     c.max_fcn_evals = v32w::gi(kv,"max_fcn_evals",0);
     c.root_search_mode = v32w::gs(kv,"root_search_mode","full_scan");
     c.det_backend = v32w::gs(kv,"det_backend","cpu_openmp");
+    c.projected_basis_cache_mode = v32w::gs(kv,"projected_basis_cache_mode","disabled");
+    c.projected_basis_cache_root = v32w::gs(kv,"projected_basis_cache_root","");
     c.fallback_full_scan = v32w::gi(kv,"fallback_full_scan",1)!=0;
     c.float_params = {
         v32w::gi(kv,"float_K3iso0",1)!=0, v32w::gi(kv,"float_K3iso1",1)!=0,
@@ -787,6 +792,14 @@ struct RuntimeBlock {
     std::string refined_path;
     IrrepCache coarse;
     IrrepCache refined;
+    bool projected_basis_mode = false;
+    struct BasisRow {
+        double Ecm = NAN;
+        int total_dim = 0;
+        int proj_dim = 0;
+        Eigen::MatrixXcd Fproj, B0, B1, BB, BE;
+    };
+    std::map<int, BasisRow> projected_basis_rows;
 };
 
 struct AcceptedZeroWindow {
@@ -869,6 +882,107 @@ static std::vector<WindowGridRow> load_window_grid(const std::string& path) {
     std::sort(rows.begin(),rows.end(),[](const auto& a,const auto& b){return a.row<b.row;});
     for(int i=0;i<(int)rows.size();++i) if(rows[std::size_t(i)].row!=i) throw std::runtime_error("det-grid row indices are not contiguous: " + path);
     return rows;
+}
+
+static std::string sha256_file2(const fs::path& path) {
+    const std::string cmd = "sha256sum '" + path.string() + "'";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if(!pipe) throw std::runtime_error("cannot run sha256sum for " + path.string());
+    char buf[256]{};
+    const bool ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+    const int rc = pclose(pipe);
+    if(!ok || rc != 0) throw std::runtime_error("sha256sum failed for " + path.string());
+    std::string out(buf);
+    const auto sp = out.find_first_of(" \t");
+    return sp == std::string::npos ? out : out.substr(0, sp);
+}
+
+static Eigen::MatrixXcd read_basis_matrix(std::ifstream& in, int dim) {
+    Eigen::MatrixXcd m(dim, dim);
+    for(int c=0; c<dim; ++c) for(int r=0; r<dim; ++r) {
+        double re=0.0, im=0.0;
+        in.read(reinterpret_cast<char*>(&re), sizeof(re));
+        in.read(reinterpret_cast<char*>(&im), sizeof(im));
+        if(!in) throw std::runtime_error("truncated projected-basis matrix");
+        m(r,c)=comp(re,im);
+    }
+    return m;
+}
+
+static std::vector<int> read_metadata_row_indices(const std::string& json,
+                                                   const fs::path& json_path) {
+    const std::string key = "\"row_indices\": [";
+    const auto begin = json.find(key);
+    if (begin == std::string::npos) throw std::runtime_error("projected-basis metadata has no row_indices: " + json_path.string());
+    const auto end = json.find(']', begin + key.size());
+    if (end == std::string::npos) throw std::runtime_error("projected-basis metadata row_indices is truncated: " + json_path.string());
+    std::vector<int> rows;
+    std::stringstream ss(json.substr(begin + key.size(), end - (begin + key.size())));
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        token = trim2(token);
+        if (!token.empty()) rows.push_back(std::stoi(token));
+    }
+    if (rows.empty()) throw std::runtime_error("projected-basis metadata row_indices is empty: " + json_path.string());
+    return rows;
+}
+
+static IrrepCache load_basis_metadata_grid(const std::string& path, const std::string& irrep) {
+    IrrepCache out; out.label=irrep; out.spec=parse_label(irrep);
+    for(const auto& r : load_window_grid(path)) {
+        ProjectedQCCacheEntry e;
+        e.label=irrep; e.spec=out.spec; e.i=r.row; e.Ecm=r.Ecm;
+        e.success=1; e.total_dim=r.Nfull; e.proj_dim=r.Nproj; e.error="OK_PROJECTED_BASIS_METADATA";
+        out.grid.push_back(std::move(e));
+    }
+    return out;
+}
+
+static void load_projected_basis_hotwindows(const MultiConfig& cfg, RuntimeBlock& rb) {
+    if(cfg.projected_basis_cache_root.empty()) throw std::runtime_error("projected_basis_cache_root is required");
+    const fs::path dir = fs::path(cfg.projected_basis_cache_root) / key_string(rb.info.L, rb.info.internal_irrep);
+    const fs::path bin_path = dir / "projected_basis_hotwindows.bin";
+    const fs::path json_path = dir / "projected_basis_hotwindows.json";
+    if(!fs::exists(bin_path) || !fs::exists(json_path)) throw std::runtime_error("projected-basis hot-window cache missing for " + key_string(rb.info.L,rb.info.internal_irrep));
+    const std::string json = [&](){ std::ifstream in(json_path); return std::string((std::istreambuf_iterator<char>(in)),{}); }();
+    for(const std::string& token : {"\"schema_version\": \"v33p_projected_basis_hotwindow_v1\"", "\"complex_convention\": \"variant_04_real_imag_swapped\"", "\"scaling_convention\": \"divided_by_pow_Lxi_6\"", "\"K3_basis_terms\""})
+        if(json.find(token)==std::string::npos) throw std::runtime_error("projected-basis metadata convention mismatch in " + json_path.string());
+    const auto hp = json.find("\"accepted_windows_sha256\": \"");
+    if(hp==std::string::npos) throw std::runtime_error("projected-basis metadata has no accepted-window hash: " + json_path.string());
+    const auto hs = hp + std::string("\"accepted_windows_sha256\": \"").size();
+    const auto he = json.find('"',hs);
+    const std::string expected_hash = json.substr(hs,he-hs);
+    const auto metadata_rows = read_metadata_row_indices(json, json_path);
+    const auto wp = json.find("\"accepted_windows_path\": \"");
+    if(wp==std::string::npos) throw std::runtime_error("projected-basis metadata has no accepted-window path: " + json_path.string());
+    const auto ws = wp + std::string("\"accepted_windows_path\": \"").size();
+    const auto we = json.find('"',ws);
+    fs::path windows_path = json.substr(ws,we-ws);
+    if(!windows_path.is_absolute()) windows_path = fs::current_path() / windows_path;
+    if(!fs::exists(windows_path) || sha256_file2(windows_path) != expected_hash)
+        throw std::runtime_error("projected-basis accepted-window hash mismatch: " + json_path.string());
+    const CacheKey key{rb.info.L,rb.info.internal_irrep};
+    const auto grid_it = cfg.det_grid_files.find(key);
+    if(grid_it==cfg.det_grid_files.end() || grid_it->second.empty()) throw std::runtime_error("projected-basis mode requires det_grid_file for " + key_string(rb.info.L,rb.info.internal_irrep));
+    std::ifstream in(bin_path, std::ios::binary);
+    char magic[8]{}; std::uint32_t version=0,count=0;
+    in.read(magic,8); in.read(reinterpret_cast<char*>(&version),4); in.read(reinterpret_cast<char*>(&count),4);
+    if(!in || std::string(magic,magic+8)!="V33PHWB1" || version!=1) throw std::runtime_error("invalid projected-basis binary: " + bin_path.string());
+    for(std::uint32_t n=0;n<count;++n) {
+        std::uint64_t row=0; double E=0.0; std::int32_t nf=0,np=0; std::uint32_t dim=0;
+        in.read(reinterpret_cast<char*>(&row),8); in.read(reinterpret_cast<char*>(&E),8); in.read(reinterpret_cast<char*>(&nf),4); in.read(reinterpret_cast<char*>(&np),4); in.read(reinterpret_cast<char*>(&dim),4);
+        if(!in || dim==0 || dim!=static_cast<std::uint32_t>(np)) throw std::runtime_error("invalid projected-basis row metadata: " + bin_path.string());
+        RuntimeBlock::BasisRow b; b.Ecm=E; b.total_dim=nf; b.proj_dim=np;
+        b.Fproj=read_basis_matrix(in,dim); b.B0=read_basis_matrix(in,dim); b.B1=read_basis_matrix(in,dim); b.BB=read_basis_matrix(in,dim); b.BE=read_basis_matrix(in,dim);
+        rb.projected_basis_rows.emplace(static_cast<int>(row),std::move(b));
+    }
+    if(rb.projected_basis_rows.empty()) throw std::runtime_error("projected-basis cache contains no rows: " + bin_path.string());
+    if(metadata_rows.size() != rb.projected_basis_rows.size())
+        throw std::runtime_error("projected-basis metadata/binary row count mismatch: " + json_path.string());
+    for(const int row : metadata_rows)
+        if(rb.projected_basis_rows.find(row) == rb.projected_basis_rows.end())
+            throw std::runtime_error("projected-basis metadata row missing from binary: " + std::to_string(row));
+    std::cout << "[projected-basis] loaded " << rb.projected_basis_rows.size() << " hot rows for " << key_string(rb.info.L,rb.info.internal_irrep) << " from " << bin_path << "\n";
 }
 
 static std::map<int,std::pair<int,int>> load_window_brackets(const std::string& path) {
@@ -958,7 +1072,17 @@ static std::vector<v32w::Cand> evaluate_accepted_window(const RuntimeBlock& rb,
         std::vector<v32w::Eval> vals;
         vals.reserve(std::size_t(right-left+1));
         for(int i=left;i<=right;++i) {
-            vals.push_back(v32w::eval_entry_QC(rb.coarse.grid[std::size_t(i)],kp,rb.par,rb.settings.debug,rb.cscale));
+            if(rb.projected_basis_mode) {
+                const auto it = rb.projected_basis_rows.find(i);
+                if(it==rb.projected_basis_rows.end()) throw std::runtime_error("projected-basis row missing for " + key_string(w.Lbyas,w.irrep) + ": " + std::to_string(i));
+                const auto& b=it->second;
+                const Eigen::MatrixXcd A=b.Fproj + kp.K3iso0*b.B0 + kp.K3iso1*b.B1 + kp.K3B*b.BB + kp.K3E*b.BE;
+                v32w::Eval v; v.E=b.Ecm; v.success=A.allFinite(); v.proj_dim=b.proj_dim;
+                if(v.success) { v.det=v32w::det_info(A); v.y=v.det.det_re; }
+                vals.push_back(std::move(v));
+            } else {
+                vals.push_back(v32w::eval_entry_QC(rb.coarse.grid[std::size_t(i)],kp,rb.par,rb.settings.debug,rb.cscale));
+            }
             if(timing) ++timing->window_rows_evaluated;
         }
         std::vector<v32w::Cand> candidates = v32w::find_QC_zeros_v3_from_coarse_grid(rb.info.internal_irrep,vals,cfg.zratio,timing);
@@ -1087,6 +1211,17 @@ static RuntimeBlock build_runtime_block(const MultiConfig& cfg, const BlockInfo&
     rb.par = make_base_physics(rb.settings);
     rb.cscale = block_cnorm(cfg, b.L);
     rb.refined_path = refined_path_for(cfg, b.L, b.internal_irrep);
+    if(cfg.projected_basis_cache_mode == "hot_windows") {
+        rb.projected_basis_mode = true;
+        rb.coarse_path = coarse_path_for(cfg, b.L, b.internal_irrep);
+        const CacheKey key{b.L,b.internal_irrep};
+        const auto it = cfg.det_grid_files.find(key);
+        if(it==cfg.det_grid_files.end() || it->second.empty()) throw std::runtime_error("projected-basis mode requires det_grid_file for " + key_string(b.L,b.internal_irrep));
+        rb.coarse = load_basis_metadata_grid(it->second, b.internal_irrep);
+        load_projected_basis_hotwindows(cfg, rb);
+        rb.refined.label=b.internal_irrep; rb.refined.spec=parse_label(b.internal_irrep);
+        return rb;
+    }
     if(cfg.cache_backend == "v33g_runtime") {
         if(!v32w::is_v3_like_mode(cfg.classifier_mode) && !v32w::is_v4_like_mode(cfg.classifier_mode)) {
             throw std::runtime_error("v33g_runtime requires a supported classifier_mode alias");
@@ -1125,7 +1260,7 @@ public:
                   << "\n";
         const auto t0 = std::chrono::steady_clock::now();
         runtime_blocks.resize(blocks.size());
-        if(cfg.cache_backend != "v33g_runtime") {
+        if(cfg.cache_backend != "v33g_runtime" && cfg.projected_basis_cache_mode != "hot_windows") {
             for(const auto& b: blocks) {
                 const std::string coarse_path = coarse_path_for(cfg, b.L, b.internal_irrep);
                 ensure_gpu_coarse_cache(cfg, b.L, b.internal_irrep, coarse_path);
@@ -1154,7 +1289,7 @@ public:
                 if(it==runtime_blocks.end()) throw std::runtime_error("runtime block missing for accepted windows: " + key_string(b.L,b.internal_irrep));
                 auto ws=load_accepted_windows(cfg,b,*it,mt);
                 accepted_windows.insert(accepted_windows.end(),ws.begin(),ws.end());
-                if(cfg.root_search_mode=="accepted_windows") {
+                if(cfg.root_search_mode=="accepted_windows" && !it->projected_basis_mode) {
                     for(const auto& w: ws) {
                         for(int row=w.max_row_left; row<=w.max_row_right; ++row) {
                             auto& e=it->coarse.grid[std::size_t(row)];
