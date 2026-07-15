@@ -1,0 +1,6 @@
+Ecm_cutoff,n_levels,model_found,chi2,dof,chi2_dof,K3iso0,K3iso0_err,K3iso1,K3iso1_err,K3B,K3B_err,K3E,K3E_err,fcn_evals,runtime,avg_fcn_time,fallback_count,full_scan_count,converged,status
+0.315,,,,,,,,,,,,,,,,,0,0,,NOT_RUN_PREFIT_GATE
+0.325,,,,,,,,,,,,,,,,,0,0,,NOT_RUN_PREFIT_GATE
+0.335,,,,,,,,,,,,,,,,,0,0,,NOT_RUN_PREFIT_GATE
+0.345,,,,,,,,,,,,,,,,,0,0,,NOT_RUN_PREFIT_GATE
+0.355,,,,,,,,,,,,,,,,,0,0,,BLOCKED_L20_200_A2_USER_TRUE_LEVEL_MISMATCH
